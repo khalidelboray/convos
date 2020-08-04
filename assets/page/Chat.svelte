@@ -17,11 +17,13 @@ import {isISOTimeString} from '../js/Time';
 import {l, topicOrStatus} from '../js/i18n';
 import {route} from '../store/Route';
 
+const rtc = getContext('rtc');
+const socket = getContext('socket');
+const user = getContext('user');
+
 const chatMessages = new ChatMessages();
 const dragAndDrop = new DragAndDrop();
-const rtc = getContext('rtc');
 const scrollspy = new Scrollspy();
-const user = getContext('user');
 const track = {}; // Holds values so we can compare before/after changes
 
 let chatInput;
@@ -35,7 +37,7 @@ let unsubscribe = {};
 $: maybeReloadMessages($route);
 $: setDialogFromRoute($route);
 $: setDialogFromUser($user);
-$: messages = chatMessages.merge($dialog.messages);
+$: messages = chatMessages.merge($dialog.messages, Array.from($socket.waiting.values()));
 $: notConnected = $dialog.frozen ? true : false;
 $: dragAndDrop.attach(document, mainEl, chatInput && chatInput.getUploadEl());
 

@@ -6,6 +6,7 @@
  */
 
 import Reactive from './Reactive';
+import Time from './Time';
 
 /**
  * socket() can be used to create global socket objects.
@@ -34,6 +35,7 @@ export default class Socket extends Reactive {
 
     this.prop('ro', 'readyState', () => this.ws.readyState);
     this.prop('ro', 'readyStateHuman', () => readyStateHuman[this.ws.readyState]);
+    this.prop('ro', 'waiting', new Map());
     this.prop('rw', 'error', '');
     this.prop('rw', 'keepaliveInterval', 10000);
     this.prop('rw', 'keepaliveMessage', {});
@@ -43,7 +45,6 @@ export default class Socket extends Reactive {
     this.id = 0;
     this.queue = [];
     this.keepClosed = true;
-    this.waiting = {};
     this._resetWebSocket();
 
     this._onOffline = this._onOffline.bind(this);
@@ -192,11 +193,15 @@ export default class Socket extends Reactive {
 
   _dequeue() {
     const queue = this.queue;
+    if (queue.length) this.update({waiting: true});
     while (queue.length) {
       if (this.ws.readyState != WebSocket.OPEN) return;
       const msg = queue.shift();
+      if (msg.message) this.ws.close();
       this.ws.send(this.deflateMessage(msg));
-      this.waiting[msg.id] = msg;
+      msg.waitingForResponse = true;
+      if (!msg.ts) msg.ts = new Time();
+      this.waiting.set(msg.id, msg);
     }
   }
 
@@ -208,7 +213,12 @@ export default class Socket extends Reactive {
   _onClose(e) {
     this._clearTimers();
     this._resetWebSocket();
-    this.update({readyState: true});
+    this.update({readyState: true, waiting: true});
+
+    for (let [id, msg] of this.waiting) {
+      if (Object.keys(msg).length <= 1) this.waiting.delete(id);
+      msg.waitingForResponse = false;
+    }
 
     const delay = this.reconnectIn(e);
     if (delay === true) return this.open();
@@ -225,14 +235,15 @@ export default class Socket extends Reactive {
 
     if (msg.id) {
       this.emit('message_' + msg.id, msg);
-      delete this.waiting[msg.id];
+      this.waiting.delete(msg.id);
     }
 
     this.emit('message', msg);
+    this.update({waiting: true});
 
     if (!msg.errors || msg.id) return;
-    Object.keys(this.waiting).forEach(id => this.emit('message_' + id, msg));
-    this.waiting = {};
+    for (let id of this.waiting.keys()) this.emit('message_' + id, msg);
+    this.waiting.clear();
   }
 
   _onOffline(e) {
